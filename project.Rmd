@@ -1,0 +1,193 @@
+---
+title: "Project"
+author: "Dasarath S"
+date: "20/10/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load libraries
+# Getting the data
+
+```{r}
+library(dplyr)
+library(caret)
+library(VIM)
+data_path = "./data"
+train_address = "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+test_address = "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+training_file = "pml-training.csv"
+testing_file = "pml-test.csv"
+if (!file.exists(data_path)) {
+  dir.create(data_path)
+}
+if (!file.exists(file.path(data_path, training_file))) {
+  download.file(train_address, destfile=file.path(data_path, training_file))
+}
+if (!file.exists(file.path(data_path, testing_file))) {
+  download.file(test_address, destfile=file.path(data_path, testing_file))
+}
+```
+
+## Reading Data
+
+Loading data in two separate data frames
+
+```{r}
+training <- read.csv(file.path(data_path, training_file))
+testing <- read.csv(file.path(data_path, testing_file))
+dim(training)
+dim(testing)
+head(training)
+```
+
+## Cleaning data
+
+Checking for NA/missing observations
+
+```{r}
+sum(complete.cases(training))
+```
+
+Too few observation to have a correct training.
+
+### Eliminate cols with NA/missing values
+
+Let us see column names
+
+```{r}
+colnames(training)
+plot(colMeans(is.na(training)))
+```
+
+There are columns with a lot of missing values.
+
+We will retain only the columns without NA values
+
+Covert whole data into NUMERIC to coerce the empty to NA
+
+```{r}
+training_Classe = training$classe
+training_Raw = training[, sapply(training, is.numeric)]
+testing_Raw = testing[, sapply(testing, is.numeric)]
+```
+
+Remove cols with NAs
+
+```{r}
+training_Filter <- training_Raw[, colSums(is.na(training_Raw)) == 0]
+# Attach Classe variable
+training_Filter$classe = training_Classe
+testing_Filter <- testing_Raw[, colSums(is.na(testing_Raw)) == 0]
+```
+
+Dimensions
+
+```{r}
+dim(training_Filter)
+dim(testing_Filter)
+```
+
+Removing unwanted cols like username, timestamp and ID
+
+```{r}
+unwanted_cols = !grepl("X|timestamp", colnames(training_Filter))
+cols = colnames(training_Filter)[unwanted_cols]
+training_Filter = training_Filter %>%
+  select(cols)
+unwanted_cols = !grepl("X|timestamp", colnames(testing_Filter))
+cols = colnames(testing_Filter)[unwanted_cols]
+testing_Filter = testing_Filter %>%
+  select(cols)
+```
+
+Getting dimensions of filtered dataset
+
+```{r}
+dim(training_Filter)
+dim(testing_Filter)
+```
+
+## Sliceing the given data
+
+We are going to use 80-20 to slice the Training data into **Training** and **Validation** set.
+
+```{r}
+set.seed(4321) 
+inTraining <- createDataPartition(training_Filter$classe, p=0.70, list=F)
+training_Data <- training_Filter[inTraining, ]
+validation_Data <- training_Filter[-inTraining, ]
+dim(training_Data)
+```
+
+# Data the modeling
+
+We are going to fit a model using **Random Forest** and **XGBoost**
+  ## Random forest
+  
+  ### Model
+  
+```{r}
+control_Rf <- trainControl(method="cv", 5, allowParallel = TRUE)
+model_Rf <- train(classe ~ ., data=training_Data, method="rf", trControl=control_Rf, ntree=250)
+model_Rf
+```
+
+### Performance of the model on the validation data set
+
+```{r}
+predict_rf <- predict(model_Rf, validation_Data)
+confusionMatrix(validation_Data$classe, predict_rf)
+```
+
+More acc model to classify **classe** feature
+
+## XGBoost
+
+```{r}
+control_XGB <- trainControl(method="cv", 5, allowParallel = TRUE)
+model_XGB <- train(classe ~ ., data=training_Data, method="xgbTree", trControl=control_XGB)
+```
+
+```{r}
+model_XGB
+```
+
+### Performance on validation data set
+
+```{r}
+predict_XGB <- predict(model_XGB, validation_Data)
+confusionMatrix(validation_Data$classe, predict_XGB)
+```
+
+XGB gives us a better accuracy on validation data.
+
+We have two wrongly labelled prediction A->B
+
+# Comparing both models
+
+```{r}
+# collecting re-samples
+model_results <- resamples(list(RF=model_Rf, XGB=model_XGB))
+# summarizing the distributions
+summary(model_results)
+# box-plots
+bwplot(model_results)
+# dot-plots
+dotplot(model_results)
+```
+
+# Predicting Test data with RF and XGB
+
+```{r}
+result_of_Rf <- predict(model_Rf, testing_Filter[, -length(names(testing_Filter))])
+result_of_XGB <- predict(model_XGB, testing_Filter[, -length(names(testing_Filter))])
+result_of_Rf
+result_of_XGB
+confusionMatrix(result_of_Rf, result_of_XGB)
+```
+
+In conclusion even though the model predicts the TEST data similarly, its evident that XGB works better on training data-set.
